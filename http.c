@@ -60,7 +60,7 @@ static char DBG_BUFFER[DBG_BUF_LEN];
 #define QL_UART_RX_BUFF_SIZE       2048
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 
-//ql_uart_config_s Uart_cfg = {0};				
+ql_uart_config_s uart_Cfg = {0};				
 
 
 typedef enum{
@@ -248,26 +248,65 @@ static int http_read_request_data(http_client_t *client, void *arg, char *data, 
 
 	return 0;
 }
+ void led_on()
+ {
+	ql_pin_set_func(2,2);
+	ql_gpio_set_direction(GPIO_22,GPIO_OUTPUT);
+	ql_gpio_set_pull(GPIO_22,PULL_UP);
+	ql_gpio_set_level(GPIO_22, LVL_HIGH);
+ }
 
+void led_off()
+{
+	ql_pin_set_func(2,2);
+	ql_gpio_set_direction(GPIO_22,GPIO_OUTPUT);
+	ql_gpio_set_pull(GPIO_22,PULL_DOWN);
+	ql_gpio_set_level(GPIO_22, LVL_LOW);
+}
+
+void led_Blink()
+{
+    if(registered == 0)
+	{
+		led_on();
+		ql_rtos_task_sleep_ms(250);
+		led_off();
+		ql_rtos_task_sleep_ms(250);
+	}
+	else if(registered == 1 && mqtt_connected == 0)
+	{
+		led_on();
+		ql_rtos_task_sleep_s(1);
+		led_off();
+		ql_rtos_task_sleep_s(1);
+	}
+	else if(registered == 1 && mqtt_connected == 1)
+	{
+		led_on();
+		ql_rtos_task_sleep_ms(250);
+		led_off();
+		ql_rtos_task_sleep_s(3);
+	}
+}
 static void http_app_thread(void * arg)
 {
-	// ql_uart_set_dcbconfig(QL_UART_PORT_1, &uart_cfg);
-	// ql_pin_set_func(QUEC_PIN_UART1_TXD, QL_UART1_TX_FUNC);
-	// ql_pin_set_func(QUEC_PIN_UART1_RXD, QL_UART1_RX_FUNC);
-	// ql_uart_open(QL_UART_PORT_1);
+	ql_uart_set_dcbconfig(QL_UART_PORT_1, &uart_Cfg);
+	ql_pin_set_func(QUEC_PIN_UART1_TXD, QL_UART1_TX_FUNC);
+	ql_pin_set_func(QUEC_PIN_UART1_RXD, QL_UART1_RX_FUNC);
+	ql_uart_open(QL_UART_PORT_1);
  
-    int ret = 0;// i = 0;
+    int ret = 0;
     //int profile_idx = 1;
-   // ql_data_call_info_s info;
+   //ql_data_call_info_s info;
 	//char ip4_addr_str[16] = {0};
 	int run_num = 0;
 	struct stat dload_stat;
-	//uint8_t nSim = 0;
+	uint8_t nSim = 0;
 	int flags_break = 0;
 	ql_event_t qhttpc_event_msg = {0};
 	
 	ql_rtos_task_sleep_s(5);
-	// APP_DEBUG("\n========== http demo start ==========");
+	 APP_DEBUG("HTTP Upload Boot...\n");
 	// APP_DEBUG("\nwait for network register done");
 	
 	// while((ret = ql_network_register_wait(nSim, 120)) != 0 && i < 10){
@@ -306,176 +345,175 @@ static void http_app_thread(void * arg)
 
 	// inet_ntop(AF_INET, &info.v4.addr.sec_dns, ip4_addr_str, sizeof(ip4_addr_str));
 	// APP_DEBUG("info.v4.addr.sec_dns: %s\r\n", ip4_addr_str);
-
-	while(1){
-		
+    
+	while(1)
+	{
 		ql_rtos_task_sleep_ms(500);
+		led_Blink();
 		if(upload_flag == 1 && sd_flag == 1 && re_upload <= 1)
 		{
-			upload_flag = 0;
-		int http_method = HTTP_METHOD_NONE;
-		//char dload_file[] = "UFS:http_dload.txt";
-		//char upload_file[] = "SD:http_upload.txt";
+		   	int http_method = HTTP_METHOD_NONE;
+		   	//char dload_file[] = "UFS:http_dload.txt";
+		   	//char upload_file[] = "SD:DCONAGAIR00000.txt";
+		  	int fd1;
+		   	APP_DEBUG("\n==============http_Upload_Start[%d]================\n",run_num+1);
+           	fd1 =  ql_file_exist(upload_file);
+		   	APP_DEBUG("\n%d",fd1);
+		   	memset(&http_demo_client, 0x00, sizeof(qhttpc_ctx_t));
+
+		 	http_demo_client.dl_block = false;
+		   	http_demo_client.dl_high_line = HTTP_DLOAD_HIGH_LINE;
+
+		   	ret = ql_rtos_mutex_create(&http_demo_client.simple_lock);
+		   	if(ret) 
+		   	{
+			   	APP_DEBUG("\nql_rtos_mutex_create failed!!!!");
+			 	break;
+			}
+
+		    ret = ql_rtos_queue_create(&http_demo_client.queue, sizeof(ql_event_t), HTTP_MAX_MSG_CNT);
+			if(ret) 
+			{
+				APP_DEBUG("\nql_rtos_queue_create failed!!!!");
+				break;
+			}
 		
-		APP_DEBUG("\n==============http_client_test[%d]================\n",run_num+1);
-
-		memset(&http_demo_client, 0x00, sizeof(qhttpc_ctx_t));
-
-		http_demo_client.dl_block = false;
-		http_demo_client.dl_high_line = HTTP_DLOAD_HIGH_LINE;
-
-		ret = ql_rtos_mutex_create(&http_demo_client.simple_lock);
-		if (ret) 
-		{
-			APP_DEBUG("\nql_rtos_mutex_create failed!!!!");
-			break;
-		}
-
-		ret = ql_rtos_queue_create(&http_demo_client.queue, sizeof(ql_event_t), HTTP_MAX_MSG_CNT);
-		if (ret) 
-		{
-			APP_DEBUG("\nql_rtos_queue_create failed!!!!");
-			break;
-		}
-		
-		if(ql_httpc_new(&http_demo_client.http_client, http_event_cb, (void *)&http_demo_client) != HTTP_SUCCESS){
-			APP_DEBUG("\nhttp client create failed!!!!");
-			break;
-		}
-		profile_id = 1;
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_SIM_ID, nSim);
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_PDPCID, profile_id);
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_WRITE_FUNC, http_write_response_data);
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_WRITE_DATA, (void *)&http_demo_client);
+			if(ql_httpc_new(&http_demo_client.http_client, http_event_cb, (void *)&http_demo_client) != HTTP_SUCCESS){
+				APP_DEBUG("\nhttp client create failed!!!!");
+				break;
+			}
+			//int profile_id = 1;
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_SIM_ID, nSim);
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_PDPCID,1);
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_WRITE_FUNC, http_write_response_data);
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_WRITE_DATA, (void *)&http_demo_client);
 							
-		char url[] = "http://dev.mwsresearchcentre.com:8000/device/c91f185c-ffd5-4d29-bf68-96dbb7cf5539/upload";
-		struct stat stat_buf;
-		http_method = HTTP_METHOD_POST;
+			char url[] = "http://dev.mwsresearchcentre.com:8000/device/a4cd0dcf-664e-44d9-b6e3-1abca16e8d9c/upload";
+			struct stat stat_buf;
+			http_method = HTTP_METHOD_POST;
 			
-		http_demo_client.upload_fd = ql_fopen(upload_file, "r");
-        APP_DEBUG("\nfile FD :%d", http_demo_client.upload_fd );
-
-		if(http_demo_client.upload_fd < 0)
-		{
-			ql_fclose(http_demo_client.dload_fd);
-			ql_httpc_release(&http_demo_client.http_client);
-			goto exit;
-		}
-		memset(&stat_buf, 0x00, sizeof(struct stat));
-
-		ql_fstat(http_demo_client.upload_fd, &stat_buf);
-		//APP_DEBUG("file size:%d", stat_buf.st_size);
-		if(stat_buf.st_size == 0)
-		{
-			ql_fclose(http_demo_client.upload_fd);
-			ql_fclose(http_demo_client.dload_fd);
-			ql_httpc_release(&http_demo_client.http_client);
-		}
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_METHOD, http_method);
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_URL, (char *)url);
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_REQUEST_HEADER, "Content-type: multipart/form-data");
-		ql_httpc_formadd(&http_demo_client.http_client, HTTP_FORM_NAME, "file");
-		ql_httpc_formadd(&http_demo_client.http_client, HTTP_FORM_FILENAME, upload_file);
-		ql_httpc_formadd(&http_demo_client.http_client, HTTP_FORM_CONTENT_TYPE, "text/plain");
-				
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_READ_FUNC, http_read_request_data);
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_READ_DATA, (void *)&http_demo_client);
-		ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_UPLOAD_LEN, stat_buf.st_size);
-
-		if(ql_httpc_perform(&http_demo_client.http_client) == HTTP_SUCCESS)
-		{
-			APP_DEBUG("\nwait http perform end!!!!!!");
-
-			flags_break = 0;
-			for (;;)
+			http_demo_client.upload_fd = ql_fopen(upload_file, "r");
+        	APP_DEBUG("\nfile FD :%d", http_demo_client.upload_fd );
+			if(http_demo_client.upload_fd < 0)
 			{
-				memset(&qhttpc_event_msg, 0x00, sizeof(ql_event_t));
-				
-				ql_rtos_queue_wait(http_demo_client.queue, (uint8 *)&qhttpc_event_msg, sizeof(ql_event_t), QL_WAIT_FOREVER);
-
-				switch(qhttpc_event_msg.id)
-				{
-					case QHTTPC_EVENT_END:
-					{
-						flags_break = 1;
-					}
-						break;
-					default:
-						break;
-				}
-
-				if(flags_break)
-					break;
+				ql_fclose(http_demo_client.dload_fd);
+				ql_httpc_release(&http_demo_client.http_client);
+				goto exit;
 			}
-		}else{
-			APP_DEBUG("\nhttp perform failed!!!!!!!!!!");
-		}
-		memset(&dload_stat, 0x00, sizeof(struct stat));
-		ql_fstat(http_demo_client.dload_fd, &dload_stat);
-		//APP_DEBUG("=========dload_file_size:%d", dload_stat.st_size);
-		if(http_demo_client.dload_fd >= 0){
-			ql_fclose(http_demo_client.dload_fd);
-			http_demo_client.dload_fd = -1;
-		}
-		ql_rtos_mutex_lock(http_demo_client.simple_lock, 100);
-		if(http_demo_client.upload_fd >= 0){
-			ql_fclose(http_demo_client.upload_fd);
-			http_demo_client.upload_fd = -1;
-		}
-		ql_rtos_mutex_unlock(http_demo_client.simple_lock);
-		
-		ql_httpc_release(&http_demo_client.http_client);
-		http_demo_client.http_client = 0;
-		APP_DEBUG("\n==============http_client_test_end[%d]================\n",run_num+1);
-		run_num++;
+			memset(&stat_buf, 0x00, sizeof(struct stat));
 
-		if(http_demo_client.queue != NULL)
-		{
-			while(1)
+			ql_fstat(http_demo_client.upload_fd, &stat_buf);
+			//APP_DEBUG("file size:%d", stat_buf.st_size);
+			if(stat_buf.st_size == 0)
 			{
-				memset(&qhttpc_event_msg, 0x00, sizeof(ql_event_t));
+				ql_fclose(http_demo_client.upload_fd);
+				ql_fclose(http_demo_client.dload_fd);
+				ql_httpc_release(&http_demo_client.http_client);
+			}
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_METHOD, http_method);
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_URL, (char *)url);
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_REQUEST_HEADER, "Content-type: multipart/form-data");
+			ql_httpc_formadd(&http_demo_client.http_client, HTTP_FORM_NAME, "file");
+			ql_httpc_formadd(&http_demo_client.http_client, HTTP_FORM_FILENAME, upload_file);
+			ql_httpc_formadd(&http_demo_client.http_client, HTTP_FORM_CONTENT_TYPE, "text/plain");
 				
-				if(QL_OSI_SUCCESS != ql_rtos_queue_wait(http_demo_client.queue, (uint8 *)&qhttpc_event_msg, sizeof(ql_event_t), 0))
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_READ_FUNC, http_read_request_data);
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_READ_DATA, (void *)&http_demo_client);
+			ql_httpc_setopt(&http_demo_client.http_client, HTTP_CLIENT_OPT_UPLOAD_LEN, stat_buf.st_size);
+
+			if(ql_httpc_perform(&http_demo_client.http_client) == HTTP_SUCCESS)
+			{
+				APP_DEBUG("\nwait http perform end!!!!!!");
+
+				flags_break = 0;
+				for (;;)
+				{
+					memset(&qhttpc_event_msg, 0x00, sizeof(ql_event_t));
+				
+					ql_rtos_queue_wait(http_demo_client.queue, (uint8 *)&qhttpc_event_msg, sizeof(ql_event_t), QL_WAIT_FOREVER);
+
+					switch(qhttpc_event_msg.id)
+					{
+						case QHTTPC_EVENT_END:
+						{
+							flags_break = 1;
+						}
+						break;
+						default:
+						break;
+					}
+
+					if(flags_break)
+					break;
+				}
+			}else
+			{
+				APP_DEBUG("\nhttp perform failed!!!!!!!!!! %d",ql_httpc_perform(&http_demo_client.http_client));
+			}
+			memset(&dload_stat, 0x00, sizeof(struct stat));
+			ql_fstat(http_demo_client.dload_fd, &dload_stat);
+			//APP_DEBUG("=========dload_file_size:%d", dload_stat.st_size);
+			if(http_demo_client.dload_fd >= 0){
+				ql_fclose(http_demo_client.dload_fd);
+				http_demo_client.dload_fd = -1;
+			}
+			ql_rtos_mutex_lock(http_demo_client.simple_lock, 100);
+			if(http_demo_client.upload_fd >= 0){
+				ql_fclose(http_demo_client.upload_fd);
+				http_demo_client.upload_fd = -1;
+			}
+			ql_rtos_mutex_unlock(http_demo_client.simple_lock);
+		
+			ql_httpc_release(&http_demo_client.http_client);
+			http_demo_client.http_client = 0;
+			APP_DEBUG("\n==============http_Upload_end[%d]================\n",run_num+1);
+			run_num++;
+
+			if(http_demo_client.queue != NULL)
+			{
+				while(1)
+				{
+					memset(&qhttpc_event_msg, 0x00, sizeof(ql_event_t));
+			
+					if(QL_OSI_SUCCESS != ql_rtos_queue_wait(http_demo_client.queue, (uint8 *)&qhttpc_event_msg, sizeof(ql_event_t), 0))
 					break;
 
-				switch(qhttpc_event_msg.id)
-				{
-					case QHTTPC_EVENT_RESPONSE:
+					switch(qhttpc_event_msg.id)
 					{
-						free((void *)(qhttpc_event_msg.param2));
+						case QHTTPC_EVENT_RESPONSE:
+						{
+							free((void *)(qhttpc_event_msg.param2));
+						}
+						break;
+						default:
+						break;
 					}
-						break;
-					default:
-						break;
 				}
+				ql_rtos_queue_delete(http_demo_client.queue);
 			}
-			ql_rtos_queue_delete(http_demo_client.queue);
-			http_demo_client.queue = NULL;
-		}
-
-		ql_rtos_mutex_delete(http_demo_client.simple_lock);
-		http_demo_client.simple_lock = NULL;
-		
-		ql_rtos_task_sleep_s(3);
-		if(res_code == 200)
-		{
-			int http_fd = 0;
-			http_fd = ql_remove(upload_file);
-        	if(http_fd < 0)
-        	{
-            	APP_DEBUG("\nfile remove failed\n");
-        	}
-        	else
-        	{
-				APP_DEBUG("\nfile removed %d\n",http_fd);
-        	}
-		}
-		else
-		{
-			upload_flag = 1;
-			re_upload++;
-		}
-	}
+			ql_rtos_mutex_delete(http_demo_client.simple_lock);
+			http_demo_client.simple_lock = NULL;
+			//ql_rtos_task_sleep_s(1);
+			if(res_code == 200)
+			{
+				int http_fd = 0;
+				http_fd = ql_remove(upload_file);
+       	 		if(http_fd < 0)
+       	 		{
+        	    	APP_DEBUG("\nfile remove failed\n");
+        		}
+        		else
+        		{
+					APP_DEBUG("\nfile removed %d\n",http_fd);
+        		}
+			}
+			else
+			{
+				upload_flag = 1;
+				re_upload++;
+			}
+			upload_flag = 0;
+	   }
 	}
 exit:
 	if(http_demo_client.queue != NULL)
@@ -512,7 +550,7 @@ void ql_http_app_init(void)
 {
     QlOSStatus err = QL_OSI_SUCCESS;
     
-    err = ql_rtos_task_create(&http_task, 4096, APP_PRIORITY_NORMAL, "QhttpApp", http_app_thread, NULL, 5);
+    err = ql_rtos_task_create(&http_task, 4096, APP_PRIORITY_LOW, "QhttpApp", http_app_thread, NULL, 5);
 	if(err != QL_OSI_SUCCESS)
 	{
 		APP_DEBUG("\ncreated task failed");
